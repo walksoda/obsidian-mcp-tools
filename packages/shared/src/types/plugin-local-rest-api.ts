@@ -114,6 +114,7 @@ export const ApiSmartSearchResult = type({
   text: "string",
   score: "number",
   breadcrumbs: "string",
+  "originalScore?": "number",
 });
 
 /**
@@ -140,6 +141,8 @@ export const ApiSearchParameters = type({
     folders: "string[]?",
     excludeFolders: "string[]?",
     limit: "number?",
+    freshness: "boolean?",
+    freshnessHalfLife: "number?",
   },
 });
 

@@ -6,7 +6,7 @@ import { lastValueFrom } from "rxjs";
 import {
   jsonSearchRequest,
   LocalRestAPI,
-  searchParameters,
+  searchParametersWithFreshness,
   Templater,
   type PromptArgAccessor,
   type SearchResponse,
@@ -163,6 +163,22 @@ export default class McpToolsPlugin extends Plugin {
     }
   }
 
+  private getArticleDate(filePath: string): Date | null {
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) return null;
+    const cache = this.app.metadataCache.getFileCache(file);
+    const fm = cache?.frontmatter;
+    for (const key of ["published", "created"]) {
+      const val = fm?.[key];
+      if (val != null) {
+        if (typeof val !== "string" && typeof val !== "number") continue;
+        const d = new Date(val);
+        if (!Number.isNaN(d.getTime())) return d;
+      }
+    }
+    return new Date(file.stat.ctime);
+  }
+
   private async handleSearchRequest(req: Request, res: Response) {
     try {
       const dep = await lastValueFrom(loadSmartSearchAPI(this));
@@ -178,17 +194,21 @@ export default class McpToolsPlugin extends Plugin {
         return;
       }
 
-      // Validate request body
+      // Validate request body, extracting freshness params separately
       const requestBody = jsonSearchRequest
-        .pipe(({ query, filter = {} }) => ({
-          query,
-          filter: shake({
-            key_starts_with_any: filter.folders,
-            exclude_key_starts_with_any: filter.excludeFolders,
-            limit: filter.limit,
+        .pipe(({ query, filter = {} }) =>
+          shake({
+            query,
+            freshness: filter.freshness,
+            freshnessHalfLife: filter.freshnessHalfLife,
+            filter: shake({
+              key_starts_with_any: filter.folders,
+              exclude_key_starts_with_any: filter.excludeFolders,
+              limit: filter.limit,
+            }),
           }),
-        }))
-        .to(searchParameters)(req.body);
+        )
+        .to(searchParametersWithFreshness)(req.body);
       if (requestBody instanceof type.errors) {
         res.status(400).json({
           error: "Invalid request body",
@@ -197,13 +217,60 @@ export default class McpToolsPlugin extends Plugin {
         return;
       }
 
+      const freshness = requestBody.freshness ?? false;
+      const halfLifeDays = requestBody.freshnessHalfLife ?? 365;
+      const originalLimit = requestBody.filter.limit ?? 20;
+
+      // Expand candidate pool when freshness is enabled
+      const searchFilter = freshness
+        ? { ...requestBody.filter, limit: Math.min(originalLimit * 3, 200) }
+        : requestBody.filter;
+
       // Perform search
       const results = await smartSearch.search(
         requestBody.query,
-        requestBody.filter,
+        searchFilter,
       );
 
-      // Format response
+      if (freshness) {
+        // Apply freshness decay, re-sort, and trim to original limit
+        const scored = results.map((result) => {
+          const date = this.getArticleDate(result.item.file_path ?? result.item.path);
+          const ageDays = date
+            ? Math.max(0, (Date.now() - date.getTime()) / 86_400_000)
+            : 0;
+          const decayedScore = date
+            ? result.score * Math.pow(0.5, ageDays / halfLifeDays)
+            : result.score;
+          return { result, decayedScore, originalScore: result.score };
+        });
+
+        // Sort: decayedScore desc → originalScore desc → path asc
+        scored.sort((a, b) =>
+          b.decayedScore - a.decayedScore
+          || b.originalScore - a.originalScore
+          || (a.result.item.path < b.result.item.path ? -1 : a.result.item.path > b.result.item.path ? 1 : 0),
+        );
+
+        const trimmed = scored.slice(0, originalLimit);
+
+        const response: SearchResponse = {
+          results: await Promise.all(
+            trimmed.map(async ({ result, decayedScore, originalScore }) => ({
+              path: result.item.path,
+              text: await result.item.read(),
+              score: decayedScore,
+              breadcrumbs: result.item.breadcrumbs,
+              originalScore,
+            })),
+          ),
+        };
+
+        res.json(response);
+        return;
+      }
+
+      // Non-freshness path (unchanged behavior)
       const response: SearchResponse = {
         results: await Promise.all(
           results.map(async (result) => ({

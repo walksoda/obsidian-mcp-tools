@@ -18,6 +18,12 @@ export function registerSmartConnectionsTools(tools: ToolRegistry) {
           "limit?": type("number>0").describe(
             "The maximum number of results to return",
           ),
+          "freshness?": type("boolean").describe(
+            "Enable freshness-based score decay. Newer articles score higher. (default: false)",
+          ),
+          "freshnessHalfLife?": type("number>0").describe(
+            "Half-life in days for freshness decay. Score halves every N days. (default: 365)",
+          ),
         },
       },
     }).describe("Search for documents semantically matching a text string."),
