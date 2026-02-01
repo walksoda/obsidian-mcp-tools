@@ -119,6 +119,34 @@ export class ToolRegistryClass<
     return { ...params, arguments: fixed };
   };
 
+  /**
+   * Strip undeclared parameters from the request to prevent arktype from
+   * rejecting requests that contain extra keys (e.g. when an LLM sends
+   * parameters from a different tool schema alongside the correct ones).
+   */
+  private stripUndeclaredParams = <Schema extends TSchema>(
+    schema: Schema,
+    params: Schema["infer"],
+  ): Schema["infer"] => {
+    const args = params.arguments;
+    if (!args || typeof args !== "object" || Array.isArray(args)) return params;
+
+    const jsonSchema = schema.get("arguments").toJsonSchema();
+    const declaredKeys = new Set(Object.keys(jsonSchema.properties ?? {}));
+
+    // Guard: if no properties found (e.g. Record<string, unknown>), skip stripping
+    if (declaredKeys.size === 0) return params;
+
+    const filtered: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(args)) {
+      if (declaredKeys.has(key)) {
+        filtered[key] = value;
+      }
+    }
+
+    return { ...params, arguments: filtered };
+  };
+
   dispatch = async <Schema extends TSchema>(
     params: Schema["infer"],
     context: HandlerContext,
@@ -126,8 +154,9 @@ export class ToolRegistryClass<
     try {
       for (const [schema, handler] of this.entries()) {
         if (schema.get("name").allows(params.name)) {
+          const stripped = this.stripUndeclaredParams(schema, params);
           const validParams = schema.assert(
-            this.coerceBooleanParams(schema, params),
+            this.coerceBooleanParams(schema, stripped),
           );
           // return await to handle runtime errors here
           return await handler(validParams, context);
