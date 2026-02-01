@@ -71,8 +71,10 @@ jobs:
           tag: ${{ github.ref_name }}
           artifacts: "packages/obsidian-plugin/releases/obsidian-plugin-*.zip,main.js,manifest.json,styles.css,packages/mcp-server/dist/*"
           body: |
+            > **Note:** This is a fork of [jacksteamdev/obsidian-mcp-tools](https://github.com/jacksteamdev/obsidian-mcp-tools). Not the official release.
+
             ${{ steps.get_release_body.outputs.result }}
 
             ---
-            ✨ This release includes attested build artifacts.
-            📝 View attestation details in the [workflow run](${{ env.GH_WORKFLOW_URL }})
+            This release includes attested build artifacts.
+            View attestation details in the [workflow run](${{ env.GH_WORKFLOW_URL }})
