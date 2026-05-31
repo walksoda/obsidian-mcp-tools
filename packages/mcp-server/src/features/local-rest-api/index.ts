@@ -18,6 +18,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
       };
     },
+    { readOnlyHint: true },
   );
 
   // GET Active File
@@ -46,6 +47,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         typeof data === "string" ? data : JSON.stringify(data, null, 2);
       return { content: [{ type: "text", text: content }] };
     },
+    { readOnlyHint: true },
   );
 
   // PUT Active File
@@ -65,6 +67,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: [{ type: "text", text: "File updated successfully" }],
       };
     },
+    { destructiveHint: true, idempotentHint: true },
   );
 
   // POST Active File
@@ -84,6 +87,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: [{ type: "text", text: "Content appended successfully" }],
       };
     },
+    { destructiveHint: false },
   );
 
   // PATCH Active File
@@ -128,6 +132,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         ],
       };
     },
+    { destructiveHint: true },
   );
 
   // DELETE Active File
@@ -144,6 +149,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: [{ type: "text", text: "File deleted successfully" }],
       };
     },
+    { destructiveHint: true, idempotentHint: true },
   );
 
   // POST Open File in Obsidian UI
@@ -172,6 +178,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: [{ type: "text", text: "File opened successfully" }],
       };
     },
+    { destructiveHint: false },
   );
 
   // POST Search via Dataview or JsonLogic
@@ -205,6 +212,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
       };
     },
+    { readOnlyHint: true },
   );
 
   // POST Simple Search
@@ -238,6 +246,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
       };
     },
+    { readOnlyHint: true },
   );
 
   // GET Vault Files or Directories List
@@ -262,6 +271,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
       };
     },
+    { readOnlyHint: true },
   );
 
   // GET Vault File Content
@@ -295,6 +305,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         ],
       };
     },
+    { readOnlyHint: true },
   );
 
   // PUT Vault File Content
@@ -319,6 +330,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: [{ type: "text", text: "File created successfully" }],
       };
     },
+    { destructiveHint: true, idempotentHint: true },
   );
 
   // POST Vault File Content
@@ -343,6 +355,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: [{ type: "text", text: "Content appended successfully" }],
       };
     },
+    { destructiveHint: false },
   );
 
   // PATCH Vault File Content
@@ -390,6 +403,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         ],
       };
     },
+    { destructiveHint: true },
   );
 
   // DELETE Vault File Content
@@ -412,5 +426,6 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: [{ type: "text", text: "File deleted successfully" }],
       };
     },
+    { destructiveHint: true, idempotentHint: true },
   );
 }

@@ -98,5 +98,6 @@ export function registerFetchTool(tools: ToolRegistry, server: Server) {
         );
       }
     },
+    { readOnlyHint: true, openWorldHint: true },
   );
 }

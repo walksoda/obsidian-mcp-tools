@@ -12,6 +12,14 @@ interface HandlerContext {
   server: Server;
 }
 
+export interface ToolAnnotations {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
 const textResult = type({
   type: '"text"',
   text: "string",
@@ -47,6 +55,7 @@ export class ToolRegistryClass<
   ) => Promise<Result>,
 > extends Map<TSchema, THandler> {
   private enabled = new Set<TSchema>();
+  private annotations = new Map<TSchema, ToolAnnotations>();
 
   register<
     Schema extends TSchema,
@@ -54,9 +63,12 @@ export class ToolRegistryClass<
       request: Schema["infer"],
       context: HandlerContext,
     ) => ResultSchema | Promise<ResultSchema>,
-  >(schema: Schema, handler: Handler) {
+  >(schema: Schema, handler: Handler, annotations?: ToolAnnotations) {
     if (this.has(schema)) {
       throw new Error(`Tool already registered: ${schema.get("name")}`);
+    }
+    if (annotations) {
+      this.annotations.set(schema as unknown as TSchema, annotations);
     }
     this.enable(schema);
     return super.set(
@@ -78,12 +90,17 @@ export class ToolRegistryClass<
   list = () => {
     return {
       tools: Array.from(this.enabled.values()).map((schema) => {
-        return {
+        const tool: Record<string, unknown> = {
           // @ts-expect-error We know the const property is present for a string
           name: schema.get("name").toJsonSchema().const,
           description: schema.description,
           inputSchema: schema.get("arguments").toJsonSchema(),
         };
+        const ann = this.annotations.get(schema);
+        if (ann) {
+          tool.annotations = ann;
+        }
+        return tool;
       }),
     };
   };
