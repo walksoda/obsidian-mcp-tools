@@ -10,6 +10,12 @@ const searchRequest = type({
     "excludeFolders?": type("string[]").describe(
       'An array of folder names to exclude. For example, ["Private", "Archive"]',
     ),
+    "tags?": type("string[]").describe(
+      'Include only notes having any of these tags (OR match, hierarchical: "project" also matches "project/active"). Leading # optional. For example, ["work", "draft"]',
+    ),
+    "excludeTags?": type("string[]").describe(
+      "Exclude notes having any of these tags. Same matching rules as tags.",
+    ),
     "limit?": type("number>0").describe(
       "The maximum number of results to return",
     ),
@@ -42,6 +48,8 @@ export const searchParameters = type({
 export const searchParametersWithFreshness = type({
   query: "string",
   filter: SmartConnections.SmartSearchFilter,
+  "tags?": "string[]",
+  "excludeTags?": "string[]",
   "freshness?": "boolean",
   "freshnessHalfLife?": "number>0",
 });

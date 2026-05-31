@@ -15,6 +15,12 @@ export function registerSmartConnectionsTools(tools: ToolRegistry) {
           "excludeFolders?": type("string[]").describe(
             'An array of folder names to exclude. For example, ["Private", "Archive"]',
           ),
+          "tags?": type("string[]").describe(
+            'Include only notes having any of these tags (OR match, hierarchical: "project" also matches "project/active"). Leading # optional. For example, ["work", "draft"]',
+          ),
+          "excludeTags?": type("string[]").describe(
+            "Exclude notes having any of these tags. Same matching rules as tags.",
+          ),
           "limit?": type("number>0").describe(
             "The maximum number of results to return",
           ),
@@ -26,7 +32,9 @@ export function registerSmartConnectionsTools(tools: ToolRegistry) {
           ),
         },
       },
-    }).describe("Search for documents semantically matching a text string."),
+    }).describe(
+      "Search for documents semantically matching a text string. The tags/excludeTags filters narrow the semantic top-N candidate set (not the whole vault), so a rare tag whose notes are not semantically top-ranked may yield few or no results.",
+    ),
     async ({ arguments: args }) => {
       const data = await makeRequest(
         LocalRestAPI.ApiSmartSearchResponse,
@@ -41,5 +49,6 @@ export function registerSmartConnectionsTools(tools: ToolRegistry) {
         content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
       };
     },
+    { readOnlyHint: true },
   );
 }

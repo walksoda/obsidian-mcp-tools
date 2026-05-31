@@ -1,6 +1,6 @@
 import { type } from "arktype";
 import type { Request, Response } from "express";
-import { Notice, Plugin, TFile } from "obsidian";
+import { getAllTags, Notice, Plugin, TFile } from "obsidian";
 import { shake } from "radash";
 import { lastValueFrom } from "rxjs";
 import {
@@ -179,6 +179,26 @@ export default class McpToolsPlugin extends Plugin {
     return new Date(file.stat.ctime);
   }
 
+  private getFileTags(filePath: string): string[] {
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) return [];
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (!cache) return [];
+    return (getAllTags(cache) ?? []).map((t) => t.replace(/^#/, ""));
+  }
+
+  /**
+   * OR match with hierarchical prefix: a query tag "project" matches a note
+   * tag "project" or any child like "project/active". Leading # is ignored on
+   * both sides.
+   */
+  private tagsMatch(noteTags: string[], query: string[]): boolean {
+    return query.some((q) => {
+      const nq = q.replace(/^#/, "");
+      return noteTags.some((t) => t === nq || t.startsWith(`${nq}/`));
+    });
+  }
+
   private async handleSearchRequest(req: Request, res: Response) {
     try {
       const dep = await lastValueFrom(loadSmartSearchAPI(this));
@@ -199,6 +219,8 @@ export default class McpToolsPlugin extends Plugin {
         .pipe(({ query, filter = {} }) =>
           shake({
             query,
+            tags: filter.tags,
+            excludeTags: filter.excludeTags,
             freshness: filter.freshness,
             freshnessHalfLife: filter.freshnessHalfLife,
             filter: shake({
@@ -221,16 +243,38 @@ export default class McpToolsPlugin extends Plugin {
       const halfLifeDays = requestBody.freshnessHalfLife ?? 365;
       const originalLimit = requestBody.filter.limit ?? 20;
 
-      // Expand candidate pool when freshness is enabled
-      const searchFilter = freshness
+      const includeTags = requestBody.tags ?? [];
+      const excludeTags = requestBody.excludeTags ?? [];
+      const hasTags = includeTags.length > 0 || excludeTags.length > 0;
+
+      // Expand candidate pool when freshness or tag filtering is enabled, since
+      // both trim the result set after the search runs.
+      const needsExpansion = freshness || hasTags;
+      const searchFilter = needsExpansion
         ? { ...requestBody.filter, limit: Math.min(originalLimit * 3, 200) }
         : requestBody.filter;
 
       // Perform search
-      const results = await smartSearch.search(
+      const rawResults = await smartSearch.search(
         requestBody.query,
         searchFilter,
       );
+
+      // Apply tag filtering (OR include, OR exclude) against file metadata.
+      const results = hasTags
+        ? rawResults.filter((result) => {
+            const noteTags = this.getFileTags(
+              result.item.file_path ?? result.item.path,
+            );
+            if (includeTags.length > 0 && !this.tagsMatch(noteTags, includeTags)) {
+              return false;
+            }
+            if (excludeTags.length > 0 && this.tagsMatch(noteTags, excludeTags)) {
+              return false;
+            }
+            return true;
+          })
+        : rawResults;
 
       if (freshness) {
         // Apply freshness decay, re-sort, and trim to original limit
@@ -270,10 +314,15 @@ export default class McpToolsPlugin extends Plugin {
         return;
       }
 
-      // Non-freshness path (unchanged behavior)
+      // Non-freshness path. When the candidate pool was expanded for tag
+      // filtering, trim back to the requested limit; otherwise preserve the
+      // original (search-limited) result set untouched.
+      const trimmedResults = needsExpansion
+        ? results.slice(0, originalLimit)
+        : results;
       const response: SearchResponse = {
         results: await Promise.all(
-          results.map(async (result) => ({
+          trimmedResults.map(async (result) => ({
             path: result.item.path,
             text: await result.item.read(),
             score: result.score,
