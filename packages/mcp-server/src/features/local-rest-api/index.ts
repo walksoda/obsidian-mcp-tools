@@ -1,7 +1,56 @@
 import { makeRequest, type ToolRegistry } from "$/shared";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { type } from "arktype";
+import { readFile, stat } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import { LocalRestAPI } from "shared";
+
+/** Maximum size (bytes) of a local file readable via `contentPath`. */
+export const MAX_CONTENT_FILE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Resolves the request body for `create_vault_file` from either inline
+ * `content` or a local `contentPath`. Exactly one must be provided.
+ *
+ * `content: ""` is a valid empty-file request, so presence is checked via
+ * `undefined` rather than truthiness.
+ */
+export async function resolveVaultFileBody(args: {
+  content?: string;
+  contentPath?: string;
+}): Promise<string> {
+  const hasContent = args.content !== undefined;
+  const hasPath = args.contentPath !== undefined;
+  if (hasContent === hasPath) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      "Specify exactly one of `content` or `contentPath`.",
+    );
+  }
+
+  if (hasContent) {
+    return args.content!;
+  }
+
+  const path = args.contentPath!;
+  if (!isAbsolute(path)) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      "`contentPath` must be an absolute path on the host running the MCP server.",
+    );
+  }
+
+  const { size } = await stat(path);
+  if (size > MAX_CONTENT_FILE_BYTES) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `File at \`contentPath\` is ${size} bytes, exceeding the ${MAX_CONTENT_FILE_BYTES}-byte limit.`,
+    );
+  }
+
+  return readFile(path, "utf-8");
+}
 
 export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
   // GET Status
@@ -314,16 +363,25 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       name: '"create_vault_file"',
       arguments: {
         filename: "string",
-        content: "string",
+        "content?": "string",
+        "contentPath?": "string",
       },
-    }).describe("Create a new file in your vault or update an existing one."),
+    }).describe(
+      "Create a new file in your vault or update an existing one. " +
+        "Provide the body via `content` (inline text) OR `contentPath`. " +
+        "`contentPath` is an absolute path to a text file on the host running " +
+        "the MCP server (not the client machine), read as UTF-8. " +
+        "Exactly one of `content` or `contentPath` must be specified.",
+    ),
     async ({ arguments: args }) => {
+      const body = await resolveVaultFileBody(args);
+
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
         `/vault/${encodeURIComponent(args.filename)}`,
         {
           method: "PUT",
-          body: args.content,
+          body,
         },
       );
       return {
