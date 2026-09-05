@@ -10,6 +10,21 @@ import { LocalRestAPI } from "shared";
 export const MAX_CONTENT_FILE_BYTES = 10 * 1024 * 1024;
 
 /**
+ * Percent-encodes a vault path for a request URL one segment at a time, so the
+ * separators stay real slashes.
+ *
+ * Encoding the whole path with `encodeURIComponent` turns every `/` into `%2F`.
+ * Local REST API 5.1.0 reads a `%2F` as a literal slash *inside* a single
+ * segment (a heading named "A/B"), and a segment holding a slash can never name
+ * a file — so `20_notes/x.md` sent as `20_notes%2Fx.md` resolves to nothing and
+ * the request 404s. Only vault-root files survived. Encoding segment-wise keeps
+ * the boundaries intact while still escaping spaces, `#`, `?` and non-ASCII.
+ */
+export function encodeVaultPath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+/**
  * Resolves the request body for `create_vault_file` from either inline
  * `content` or a local `contentPath`. Exactly one must be provided.
  *
@@ -217,7 +232,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
 
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
-        `/open/${encodeURIComponent(args.filename)}${query}`,
+        `/open/${encodeVaultPath(args.filename)}${query}`,
         {
           method: "POST",
         },
@@ -339,7 +354,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         : "text/markdown";
       const data = await makeRequest(
         isJson ? LocalRestAPI.ApiNoteJson : LocalRestAPI.ApiContentResponse,
-        `/vault/${encodeURIComponent(args.filename)}`,
+        `/vault/${encodeVaultPath(args.filename)}`,
         {
           headers: { Accept: format },
         },
@@ -378,7 +393,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
 
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeURIComponent(args.filename)}`,
+        `/vault/${encodeVaultPath(args.filename)}`,
         {
           method: "PUT",
           body,
@@ -403,7 +418,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     async ({ arguments: args }) => {
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeURIComponent(args.filename)}`,
+        `/vault/${encodeVaultPath(args.filename)}`,
         {
           method: "POST",
           body: args.content,
@@ -446,7 +461,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
 
       const response = await makeRequest(
         LocalRestAPI.ApiContentResponse,
-        `/vault/${encodeURIComponent(args.filename)}`,
+        `/vault/${encodeVaultPath(args.filename)}`,
         {
           method: "PATCH",
           headers,
@@ -475,7 +490,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     async ({ arguments: args }) => {
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeURIComponent(args.filename)}`,
+        `/vault/${encodeVaultPath(args.filename)}`,
         {
           method: "DELETE",
         },
