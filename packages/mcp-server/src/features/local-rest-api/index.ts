@@ -1,4 +1,17 @@
-import { makeRequest, type ToolRegistry } from "$/shared";
+import {
+  fsAppendFile,
+  fsDeleteFile,
+  fsGetFile,
+  fsListDirectory,
+  fsPatchFile,
+  fsSimpleSearch,
+  fsWriteFile,
+  makeRequest,
+  OFFLINE_NOTE,
+  offlineOnly,
+  withFallback,
+  type ToolRegistry,
+} from "$/shared";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { type } from "arktype";
@@ -298,12 +311,17 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
           : {}),
       });
 
-      const data = await makeRequest(
-        LocalRestAPI.ApiSimpleSearchResponse,
-        `/search/simple/?${query}`,
-        {
-          method: "POST",
-        },
+      const data = await withFallback(
+        "search_vault_simple",
+        () =>
+          makeRequest(
+            LocalRestAPI.ApiSimpleSearchResponse,
+            `/search/simple/?${query}`,
+            {
+              method: "POST",
+            },
+          ),
+        (vault) => fsSimpleSearch(vault, args.query, args.contextLength),
       );
 
       return {
@@ -325,11 +343,16 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     ),
     async ({ arguments: args }) => {
       const path = args.directory ? `${args.directory}/` : "";
-      const data = await makeRequest(
-        LocalRestAPI.ApiVaultFileResponse.or(
-          LocalRestAPI.ApiVaultDirectoryResponse,
-        ),
-        `/vault/${path}`,
+      const data = await withFallback(
+        "list_vault_files",
+        () =>
+          makeRequest(
+            LocalRestAPI.ApiVaultFileResponse.or(
+              LocalRestAPI.ApiVaultDirectoryResponse,
+            ),
+            `/vault/${path}`,
+          ),
+        (vault) => fsListDirectory(vault, args.directory),
       );
       return {
         content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
@@ -352,12 +375,17 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       const format = isJson
         ? "application/vnd.olrapi.note+json"
         : "text/markdown";
-      const data = await makeRequest(
-        isJson ? LocalRestAPI.ApiNoteJson : LocalRestAPI.ApiContentResponse,
-        `/vault/${encodeVaultPath(args.filename)}`,
-        {
-          headers: { Accept: format },
-        },
+      const data = await withFallback<unknown>(
+        "get_vault_file",
+        () =>
+          makeRequest(
+            isJson ? LocalRestAPI.ApiNoteJson : LocalRestAPI.ApiContentResponse,
+            `/vault/${encodeVaultPath(args.filename)}`,
+            {
+              headers: { Accept: format },
+            },
+          ),
+        (vault) => fsGetFile(vault, args.filename, isJson),
       );
       return {
         content: [
@@ -391,16 +419,29 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     async ({ arguments: args }) => {
       const body = await resolveVaultFileBody(args);
 
-      await makeRequest(
-        LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeVaultPath(args.filename)}`,
-        {
-          method: "PUT",
-          body,
+      const offline = await withFallback(
+        "create_vault_file",
+        async () => {
+          await makeRequest(
+            LocalRestAPI.ApiNoContentResponse,
+            `/vault/${encodeVaultPath(args.filename)}`,
+            {
+              method: "PUT",
+              body,
+            },
+          );
+          return false;
+        },
+        async (vault) => {
+          await fsWriteFile(vault, args.filename, body);
+          return true;
         },
       );
       return {
-        content: [{ type: "text", text: "File created successfully" }],
+        content: [
+          { type: "text", text: "File created successfully" },
+          ...(offline ? [{ type: "text" as const, text: OFFLINE_NOTE }] : []),
+        ],
       };
     },
     { destructiveHint: true, idempotentHint: true },
@@ -416,16 +457,29 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       },
     }).describe("Append content to a new or existing file."),
     async ({ arguments: args }) => {
-      await makeRequest(
-        LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeVaultPath(args.filename)}`,
-        {
-          method: "POST",
-          body: args.content,
+      const offline = await withFallback(
+        "append_to_vault_file",
+        async () => {
+          await makeRequest(
+            LocalRestAPI.ApiNoContentResponse,
+            `/vault/${encodeVaultPath(args.filename)}`,
+            {
+              method: "POST",
+              body: args.content,
+            },
+          );
+          return false;
+        },
+        async (vault) => {
+          await fsAppendFile(vault, args.filename, args.content);
+          return true;
         },
       );
       return {
-        content: [{ type: "text", text: "Content appended successfully" }],
+        content: [
+          { type: "text", text: "Content appended successfully" },
+          ...(offline ? [{ type: "text" as const, text: OFFLINE_NOTE }] : []),
+        ],
       };
     },
     { destructiveHint: false },
@@ -459,20 +513,30 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         headers["Content-Type"] = args.contentType;
       }
 
-      const response = await makeRequest(
-        LocalRestAPI.ApiContentResponse,
-        `/vault/${encodeVaultPath(args.filename)}`,
-        {
-          method: "PATCH",
-          headers,
-          body: args.content,
+      let offline = false;
+      const response = await withFallback(
+        "patch_vault_file",
+        () =>
+          makeRequest(
+            LocalRestAPI.ApiContentResponse,
+            `/vault/${encodeVaultPath(args.filename)}`,
+            {
+              method: "PATCH",
+              headers,
+              body: args.content,
+            },
+          ),
+        async (vault) => {
+          offline = true;
+          await fsPatchFile(vault, args.filename, args);
+          return "";
         },
       );
 
       return {
         content: [
           { type: "text", text: "File patched successfully" },
-          { type: "text", text: response },
+          { type: "text", text: offline ? OFFLINE_NOTE : response },
         ],
       };
     },
@@ -488,15 +552,30 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       },
     }).describe("Delete a file from your vault."),
     async ({ arguments: args }) => {
-      await makeRequest(
-        LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeVaultPath(args.filename)}`,
-        {
-          method: "DELETE",
+      const offline = await withFallback(
+        "delete_vault_file",
+        async () => {
+          await makeRequest(
+            LocalRestAPI.ApiNoContentResponse,
+            `/vault/${encodeVaultPath(args.filename)}`,
+            {
+              method: "DELETE",
+            },
+          );
+          return false;
+        },
+        async (vault) => {
+          await fsDeleteFile(vault, args.filename);
+          return true;
         },
       );
       return {
-        content: [{ type: "text", text: "File deleted successfully" }],
+        content: [
+          { type: "text", text: "File deleted successfully" },
+          ...(offline
+            ? [{ type: "text" as const, text: `${OFFLINE_NOTE} Moved to the vault's .trash/.` }]
+            : []),
+        ],
       };
     },
     { destructiveHint: true, idempotentHint: true },

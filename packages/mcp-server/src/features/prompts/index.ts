@@ -1,5 +1,6 @@
 import {
   formatMcpError,
+  isConnectionError,
   logger,
   makeRequest,
   parseTemplateParameters,
@@ -58,6 +59,11 @@ export function setupObsidianPrompts(server: Server) {
       ).flat();
       return { prompts };
     } catch (err) {
+      // Obsidian not running, or no Prompts folder: there are simply no prompts.
+      // Failing here made clients log "Failed to fetch commands" on every connect.
+      if (isConnectionError(err) || /\b404\b/.test(String((err as Error)?.message))) {
+        return { prompts: [] };
+      }
       const error = formatMcpError(err);
       logger.error("Error in ListPromptsRequestSchema handler", {
         error,

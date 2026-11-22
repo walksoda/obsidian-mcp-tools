@@ -1,4 +1,4 @@
-import { makeRequest, type ToolRegistry } from "$/shared";
+import { fallbackSmartSearch, makeRequest, withFallback, type ToolRegistry } from "$/shared";
 import { type } from "arktype";
 import { LocalRestAPI } from "shared";
 
@@ -36,13 +36,18 @@ export function registerSmartConnectionsTools(tools: ToolRegistry) {
       "Search for documents semantically matching a text string. The tags/excludeTags filters narrow the semantic top-N candidate set (not the whole vault), so a rare tag whose notes are not semantically top-ranked may yield few or no results.",
     ),
     async ({ arguments: args }) => {
-      const data = await makeRequest(
-        LocalRestAPI.ApiSmartSearchResponse,
-        `/search/smart`,
-        {
-          method: "POST",
-          body: JSON.stringify(args),
-        },
+      const data = await withFallback<unknown>(
+        "search_vault_smart",
+        () =>
+          makeRequest(
+            LocalRestAPI.ApiSmartSearchResponse,
+            `/search/smart`,
+            {
+              method: "POST",
+              body: JSON.stringify(args),
+            },
+          ),
+        () => fallbackSmartSearch(args),
       );
 
       return {
